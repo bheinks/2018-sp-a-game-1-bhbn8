@@ -1,4 +1,5 @@
 from string import ascii_lowercase
+from copy import copy
 
 
 class Board:
@@ -7,19 +8,38 @@ class Board:
     def __init__(self, fen=DEFAULT_FEN):
         fen = fen.split()
 
-        self.pieces = {"white": [], "black": []}
-        self._board = self.fen2board(fen[0])
+        self._board, self.pieces = self.fen2board(fen[0])
         self.turn = fen[1]
         self.castle = fen[2]
         self.en_passant = fen[3]
         self.halfmove_clock = int(fen[4])
         self.fullmove_counter = int(fen[5])
 
+    def copy(self):
+        new = copy(self)
+        new._board, new.pieces = self.fen2board(self.board2fen())
+
+        return new
+
     def get_piece(self, x, y):
         if 0 <= x < 8 and 0 <= y < 8:
             return self._board[y][x]
 
         raise IndexError
+
+    def set_piece(self, x, y, piece):
+        # remove our piece from original position
+        self._board[self.y][self.x] = None
+
+        # remove enemy piece if captured
+        if self._board[y][x]:
+            del self.piece[color][id]
+
+        # update board to new piece position
+        self._board[y][x] = piece
+
+        # update piece x and y values to new position
+        self.x, self.y = x, y
 
     def print(self):
         print("   +" + '-'*24 + '+')
@@ -37,7 +57,9 @@ class Board:
 
     def fen2board(self, fen):
         board = []
+        pieces = {"White": {}, "Black": {}}
         fen = fen.split('/')
+        id = 0
 
         for y in range(len(fen)):
             rank = []
@@ -46,52 +68,98 @@ class Board:
                 if fen[y][x].isdigit():
                     rank.extend([None for _ in range(int(fen[y][x]))])
                 else:
-                    color = "white" if fen[y][x].isupper() else "black"
-                    piece = Piece(self, len(rank), y, fen[y][x], color)
+                    # if uppercase, piece is white
+                    if fen[y][x].isupper():
+                        color = "White"
+                        enemy_color = "Black"
+                    # black otherwise
+                    else:
+                        color = "Black"
+                        enemy_color = "White"
+
+                    piece = Piece(self, id, len(rank), y, fen[y][x].lower(), color, enemy_color)
 
                     rank.append(piece)
-                    self.pieces[color].append(piece)
+                    pieces[color][id] = piece
+                    id += 1
 
             board.append(rank)
 
-        return board
+        return board, pieces
+
+    def board2fen(self):
+        fen = []
+
+        for row in self._board:
+            counter = 0
+            section = ""
+
+            for p in row:
+                if p:
+                    if counter > 0:
+                        section += str(counter)
+                        counter = 0
+
+                    section += str(p)
+                else:
+                    counter += 1
+
+            if counter > 0:
+                section += str(counter)
+
+            fen.append(section)
+
+        return '/'.join(fen)
+
+    def get_new_state(self):
+        return Board(self.board2fen())
 
 
 class Piece:
-    def __init__(self, board, x, y, type, color, has_moved=False):
+    def __init__(self, board, id, x, y, type, color, enemy_color, has_moved=False):
         self.board = board
+        self.id = id
         self.x = x
         self.y = y
         self.type = type
         self.color = color
+        self.enemy_color = enemy_color
         self.has_moved = has_moved
 
     def __str__(self):
-        return self.type
+        return self.type if self.color == "Black" else self.type.upper()
+
+    def __repr__(self):
+        return str(self)
 
     def _get_diagonal_moves(self, start_x, end_x, step_x, start_y, end_y, step_y):
-            legal_moves = []
-            board = self.board
+        legal_moves = []
+        board = self.board
 
-            for x, y in zip(range(start_x, end_x, step_x), range(start_y, end_y, step_y)):
-                move = x, y
+        # for every diagonal x and y coordinate
+        for x, y in zip(range(start_x, end_x, step_x), range(start_y, end_y, step_y)):
+            move = x, y
 
-                try:
-                    piece = board.get_piece(*move)
+            try:
+                piece = board.get_piece(*move)
 
-                    if not piece:
-                        legal_moves.append(move)
-                        continue
-                    
-                    if self.is_enemy(piece):
-                        legal_moves.append(move)
-                        return legal_moves
-                    else:
-                        return legal_moves
-                except IndexError:
-                    pass
+                # if square is empty
+                if not piece:
+                    legal_moves.append(move)
 
-            return legal_moves
+                # else if square has an enemy piece
+                elif self.is_enemy(piece):
+                    legal_moves.append(move)
+                    return legal_moves
+
+                # else square has a friendly piece
+                else:
+                    return legal_moves
+
+            except IndexError:
+                pass
+
+        return legal_moves
 
     def _get_horizontal_moves(self, start, end, step):
         legal_moves = []
@@ -103,15 +171,19 @@ class Piece:
             try:
                 piece = board.get_piece(*move)
 
+                # if square is empty
                 if not piece:
                     legal_moves.append(move)
-                    continue
-                
-                if self.is_enemy(piece):
+
+                # else if square has an enemy piece
+                elif self.is_enemy(piece):
                     legal_moves.append(move)
                     return legal_moves
+
+                # else square has a friendly piece
                 else:
                     return legal_moves
+
             except IndexError:
                 pass
 
@@ -127,98 +199,108 @@ class Piece:
             try:
                 piece = board.get_piece(*move)
 
+                # if square is empty
                 if not piece:
                     legal_moves.append(move)
-                    continue
-                
-                if self.is_enemy(piece):
+
+                # else if square has an enemy piece
+                elif self.is_enemy(piece):
                     legal_moves.append(move)
                     return legal_moves
+
+                # else square has a friendly piece
                 else:
                     return legal_moves
+
             except IndexError:
                 pass
 
         return legal_moves
 
-    # TODO: implement en passant and promotion
+    # TODO: implement en passant
     def _get_pawn_moves(self):
         moves = []
         board = self.board
         x, y = self.x, self.y
 
-        if self.color == "white":
-            # check up 1
+        if self.color == "White":
+            # check movement north 1
+            move = x, y-1
+
             try:
-                piece = board.get_piece(x, y-1)
+                piece = board.get_piece(*move)
 
                 if not piece:
-                    moves.append((x, y-1))
-                    
-                    try:
-                        piece = board.get_piece(x, y-2)
+                    moves.append(move)
 
-                        if not self.has_moved and not piece:
-                            moves.append((x, y-2))
-                    except IndexError:
-                        pass
+                    # if pawn has not yet moved, check movement north 2
+                    if not self.has_moved:
+                        move = x, y-2
+                        
+                        try:
+                            board.get_piece(*move)
+                            moves.append(move)
+
+                        except IndexError:
+                            pass
 
             except IndexError:
                 pass
 
-            # check up 1, left 1
-            try:
-                piece = board.get_piece(x-1, y-1)
+            possible_captures = (
+                (x-1, y-1), # west 1, north 1
+                (x+1, y-1)  # east 1, north 1
+            )
 
-                if piece and self.is_enemy(piece):
-                    moves.append((x-1, y-1))
-            except IndexError:
-                pass
+            # check possible captures
+            for capture in possible_captures:
+                try:
+                    piece = board.get_piece(*move)
 
-            # check up 1, right 1
-            try:
-                piece = board.get_piece(x+1, y-1)
+                    if piece and self.is_enemy(piece):
+                        moves.append(move)
 
-                if piece and self.is_enemy(piece):
-                    moves.append((x+1, y-1))
-            except IndexError:
-                pass
+                except IndexError:
+                    pass
         else:
-            # check down 1
+            # check movement south 1
+            move = x, y+1
+
             try:
-                piece = board.get_piece(x, y+1)
+                piece = board.get_piece(*move)
 
                 if not piece:
-                    moves.append((x, y+1))
-                    
-                    try:
-                        piece = board.get_piece(x, y+2)
+                    moves.append(move)
 
-                        if not self.has_moved and not piece:
-                            moves.append((x, y+2))
-                    except IndexError:
-                        pass
+                    # if pawn has not yet moved, check movement south 2
+                    if not self.has_moved:
+                        move = x, y+2
+                        
+                        try:
+                            board.get_piece(*move)
+                            moves.append(move)
+
+                        except IndexError:
+                            pass
 
             except IndexError:
                 pass
 
-            # check down 1, right 1
-            try:
-                piece = board.get_piece(x+1, y+1)
+            possible_captures = (
+                (x-1, y+1), # west 1, south 1
+                (x+1, y+1)  # east 1, south 1
+            )
 
-                if piece and self.is_enemy(piece):
-                    moves.append((x+1, y+1))
-            except IndexError:
-                pass
+            # check possible captures
+            for capture in possible_captures:
+                try:
+                    piece = board.get_piece(*move)
 
-            # check down 1, left 1
-            try:
-                piece = board.get_piece(x-1, y+1)
+                    if piece and self.is_enemy(piece):
+                        moves.append(move)
 
-                if piece and self.is_enemy(piece):
-                    moves.append((x-1, y+1))
-            except IndexError:
-                pass
+                except IndexError:
+                    pass
 
         return moves
 
@@ -228,22 +310,24 @@ class Piece:
         x, y = self.x, self.y
 
         possible_moves = (
-            (x+1, y-2), # right 1, up 2
-            (x+2, y-1), # right 2, up 1
-            (x+2, y+1), # right 2, down 1
-            (x+1, y+2), # right 1, down 2
-            (x-1, y+2), # left 1, down 2
-            (x-2, y+1), # left 2, down 1
-            (x-2, y-1), # left 2, up 1
-            (x-1, y-2)  # left 1, up 2
+            (x+1, y-2), # east 1, north 2
+            (x+2, y-1), # east 2, north 1
+            (x+2, y+1), # east 2, south 1
+            (x+1, y+2), # east 1, south 2
+            (x-1, y+2), # west 1, south 2
+            (x-2, y+1), # west 2, south 1
+            (x-2, y-1), # west 2, north 1
+            (x-1, y-2)  # west 1, north 2
         )
 
+        # check possible moves
         for move in possible_moves:
             try:
                 piece = board.get_piece(*move)
      
                 if not piece or self.is_enemy(piece): 
                     legal_moves.append(move)
+
             except IndexError:
                 pass
 
@@ -251,42 +335,37 @@ class Piece:
 
     def _get_bishop_moves(self):
         legal_moves = []
-        board = self.board
         x, y = self.x, self.y
 
-        # check right-up
-        legal_moves.extend(self._get_diagonal_moves(
-            x+1, 8, 1, y-1, -1, -1))
+        # check northeast
+        legal_moves.extend(self._get_diagonal_moves(x+1, 8, 1, y-1, -1, -1))
 
-        # check right-down
-        legal_moves.extend(self._get_diagonal_moves(
-            x+1, 8, 1, y+1, 8, 1))
+        # check southeast
+        legal_moves.extend(self._get_diagonal_moves(x+1, 8, 1, y+1, 8, 1))
 
-        # check left-down
-        legal_moves.extend(self._get_diagonal_moves(
-            x-1, -1, -1, y+1, 8, 1))
+        # check southwest
+        legal_moves.extend(self._get_diagonal_moves(x-1, -1, -1, y+1, 8, 1))
 
-        # check left-up
-        legal_moves.extend(self._get_diagonal_moves(
-            x-1, -1, -1, y-1, -1, -1))
+        # check northwest
+        legal_moves.extend(self._get_diagonal_moves(x-1, -1, -1, y-1, -1, -1))
 
         return legal_moves
 
     def _get_rook_moves(self):
         legal_moves = []
-        board = self.board
+        x, y = self.y, self.x
 
-        # get right
-        legal_moves.extend(self._get_horizontal_moves(self.x+1, 8, 1))
+        # check east
+        legal_moves.extend(self._get_horizontal_moves(x+1, 8, 1))
 
-        # get down
-        legal_moves.extend(self._get_vertical_moves(self.y+1, 8, 1))
+        # check south
+        legal_moves.extend(self._get_vertical_moves(y+1, 8, 1))
 
-        # get left
-        legal_moves.extend(self._get_horizontal_moves(self.x-1, 0, -1))
+        # check west
+        legal_moves.extend(self._get_horizontal_moves(x-1, 0, -1))
 
-        # get up
-        legal_moves.extend(self._get_vertical_moves(self.y-1, 0, -1))
+        # check north
+        legal_moves.extend(self._get_vertical_moves(y-1, 0, -1))
         
         return legal_moves
 
@@ -297,22 +376,35 @@ class Piece:
     # TODO: implement castling
     def _get_king_moves(self):
         legal_moves = []
-        board = self.board
         
+        # check adjacent squares (+2 because range upper bound is exclusive)
         for y in range(self.y-1, self.y+2):
             for x in range(self.x-1, self.x+2):
+                # if not the square we're in
                 if not (x == self.x and y == self.y):
                     move = x, y
 
                     try:
-                        piece = board.get_piece(*move)
+                        piece = self.board.get_piece(*move)
 
                         if not piece or self.is_enemy(piece):
                             legal_moves.append(move)
+
                     except IndexError:
                         pass
 
         return legal_moves
+
+    def in_check(self):
+        # for every enemy piece
+        for piece in self.board.pieces[self.enemy_color]:
+            # for every possible move
+            for move in piece.get_moves():
+                # if enemy can move to king location, we're in check
+                if (self.x, self.y) == (piece.x, piece.y):
+                    return True
+
+        return False
 
     def get_moves(self):
         PIECE_MAP = {
@@ -324,28 +416,31 @@ class Piece:
             'k': self._get_king_moves
         }
 
-        return PIECE_MAP[self.type.lower()]()
+        return Piece.PIECE_MAP[self.type.lower()]()
 
-    def move(self, x, y):
-        pass
+    def move(self, file, rank, promotion_type=""):
+        x, y = fr2coord(file, rank)
+
+        self.board.set_piece(x, y, self)
+        self.has_moved = True
+
+        if promotion_type:
+            self.type = promotion_type
 
     def is_enemy(self, other):
         return self.color != other.color
+
+    @staticmethod
+    def coord2fr(x, y):
+        return ascii_lowercase[x], 8-y
+
+    @staticmethod
+    def fr2coord(file, rank):
+        return ord(file)-97, 8-rank
+
 
 class Player:
     def __init__(self, board, color):
         self.board = board
         self.color = color
         self.pieces = board.pieces[color]
-
-
-#board = Board("rnbqkbnr/pppppppp/1P6/8/8/8/P1PPPPPP/RNBQKBNR w KQkq - 0 1")
-board = Board("1nb3nr/pppppppp/r2q1b2/8/8/4k3/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
-#board = Board()
-board.print()
-print(board.get_piece(5, 2).get_moves())
-print(board.get_piece(0, 1).get_moves())
-print(board.get_piece(1, 0).get_moves())
-print(board.get_piece(0, 2).get_moves())
-print(board.get_piece(3, 2).get_moves())
-print(board.get_piece(4, 5).get_moves())
