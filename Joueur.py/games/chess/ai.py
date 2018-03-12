@@ -1,22 +1,15 @@
 # This is where you build your AI for the Chess game.
 
-from random import randint, choice
-from string import ascii_lowercase
+from random import choice
+from time import sleep
 
 # local imports
 from joueur.base_ai import BaseAI
-from games.chess.board import Board, Player
+from games.chess.board import Board, Player, Move
 
 # <<-- Creer-Merge: imports -->> - Code you add between this comment and the end comment will be preserved between Creer re-runs.
 # you can add additional import(s) here
 # <<-- /Creer-Merge: imports -->>
-
-PROMOTION_MAP = {
-    "Knight": 'n',
-    "Bishop": 'b',
-    "Rook": 'r',
-    "Queen": 'q'
-}
 
 class AI(BaseAI):
     """ The basic AI functions that are the same between games. """
@@ -36,8 +29,14 @@ class AI(BaseAI):
         """
         # <<-- Creer-Merge: start -->> - Code you add between this comment and the end comment will be preserved between Creer re-runs.
         
+        # our local board representation
         self.board = Board(self.game.fen)
+
+        # our local player representation
         self.local_player = Player(self.board, self.player.color)
+
+        # True when we ditch a new board state, False otherwise
+        self.rerun = False
 
         # <<-- /Creer-Merge: start -->>
 
@@ -66,74 +65,82 @@ class AI(BaseAI):
         """
         # <<-- Creer-Merge: runTurn -->> - Code you add between this comment and the end comment will be preserved between Creer re-runs.
 
-        if len(self.game.moves) > 0:
+        # if we're not evaluating a new state, don't update local board again
+        if len(self.game.moves) > 0 and not self.rerun:
             self.update_last_move()
-            print(f"Opponent's last move: '{self.game.moves[-1].san}'")
 
-        moves = []
-        while not moves:
-            local_piece, piece = self.select_piece()
-            moves = local_piece.get_moves()
+        # create new board state and player
+        new_board = Board(self.board.board2fen())
+        new_local_player = Player(new_board, self.player.color)
 
-        move = choice(local_piece.get_moves())
-        new_board = AI.get_new_state(self.board, local_piece, *move)
+        # select a random move from all possible moves
+        local_move = choice(new_local_player.get_all_moves())
 
-        print(f"Moving {self.player.color} {local_piece} at {local_piece.x}, {local_piece.y} to {x}, {y}")
-        print(f"Or {ascii_lowercase[local_piece.x]}, {8-local_piece.y} to {ascii_lowercase[x]}, {8-y}")
+        return self.simulate_move(new_board, new_local_player, local_move)
 
-        print(local_piece.get_moves())
-        print("Remote board:")
-        self.print_current_board()
-        print("\nLocal board:")
-        self.board.print()
-
-        promotionType = ""
-
-        if piece.type == "Pawn":
-            if (self.player.color == "White" and  y == 0) or (
-                    self.player.color == "Black" and y == 7):
-                promotionType = choice(list(PROMOTION_MAP.keys()))
-
-        piece.move(*Board.coord2fr(x, y), promotionType)
-        local_piece.move(*Board.coord2fr(x, y), PROMOTION_MAP.get(promotionType, ""))
-
-        return True
         # <<-- /Creer-Merge: runTurn -->>
 
     # <<-- Creer-Merge: functions -->> - Code you add between this comment and the end comment will be preserved between Creer re-runs.
 
-    @staticmethod
-    def get_new_state(board, local_piece, x, y)
-        new = Board(board.board2fen())
+    def simulate_move(self, board, local_player, local_move):
+        piece = local_move.piece
+        promotion_type = local_move.promotion
+        x, y = local_move.x, local_move.y
 
-    def select_piece(self):
-        local_piece, piece = None, None
+        possible_moves = piece.get_moves()
+        old_coord = piece.x, piece.y
+        old_type = piece.type
 
-        # if we're in check, we have to move the king
-        if self.player.in_check:
-            for p in self.local_player.pieces:
-                if p.type == 'k':
-                    local_piece = p
-                    break
+        piece.move(local_move)
 
-            for p in self.player.pieces:
-                if p.type == "King":
-                    piece = p
-                    break
-        else:
-            local_piece = choice(local_player.pieces)
-            
-            for p in self.player.pieces:
-                if Board.rf2coord(p.file, p.rank) == (local_piece.x, local_piece.y):
-                    piece = p
-                    break
+        # discard state if we end up in check
+        for p in local_player.pieces.values():
+            if p.type == 'King' and p.in_check():
+                self.rerun = True
+                return False
 
-        return local_piece, piece
+        # otherwise it's a valid move. find remote piece and move
+        for p in self.player.pieces:
+            if Board.fr2coord(p.file, p.rank) == old_coord:
+                p.move(*Board.coord2fr(x, y), promotion_type)
+                break
+
+        # update board state and player
+        self.board = board
+        self.local_player = local_player
+
+        print("Available moves:")
+        for move in possible_moves:
+            old_file, old_rank = Board.coord2fr(*old_coord)
+
+            print("{} {} from {}{} to {}".format(
+                piece.color,
+                old_type,
+                old_file, old_rank,
+                move))
+
+        print()
+
+        print("Selected move:")
+        print("{} {} from {}{} to {}".format(
+            piece.color,
+            old_type,
+            old_file, old_rank,
+            local_move))
+
+        print('-'*24)
+        print()
+
+        self.rerun = False
+        return True
 
     def update_last_move(self):
         move = self.game.moves[-1]
-        local_piece = self.board.get_piece(*Board.fr2coord(move.from_file, move.from_rank))
-        local_piece.move(move.to_file, move.to_rank)
+        from_x, from_y = Board.fr2coord(move.from_file, move.from_rank)
+        to_x, to_y = Board.fr2coord(move.to_file, move.to_rank)
+        piece = self.board.get_piece(from_x, from_y)
+
+        piece.move(Move(piece, to_x, to_y, move.promotion))
 
     def print_current_board(self):
         """Prints the current board using pretty ASCII art
